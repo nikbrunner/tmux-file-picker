@@ -9,7 +9,7 @@ https://github.com/user-attachments/assets/df04f352-0c33-4987-bd23-caa19ee019a4
 
 1.  Download the script:
     ```sh
-    curl -O https://raw.githubusercontent.com/raine/tmux-file-picker/main/tmux-file-picker
+    curl -O https://raw.githubusercontent.com/nikbrunner/tmux-file-picker/main/tmux-file-picker
     ```
 2.  Make it executable:
     ```sh
