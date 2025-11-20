@@ -7,6 +7,8 @@ https://github.com/user-attachments/assets/df04f352-0c33-4987-bd23-caa19ee019a4
 
 ## Installation
 
+### Option 1: Direct Installation
+
 1.  Download the script:
     ```sh
     curl -O https://raw.githubusercontent.com/nikbrunner/tmux-file-picker/main/tmux-file-picker
@@ -18,6 +20,24 @@ https://github.com/user-attachments/assets/df04f352-0c33-4987-bd23-caa19ee019a4
 3.  Move it to a directory in your `PATH`:
     ```sh
     mv tmux-file-picker ~/.local/bin/
+    ```
+
+### Option 2: Development Installation (via symlink)
+
+If you're forking or modifying the script, use a symlink so changes are immediately available:
+
+1.  Clone the repository:
+    ```sh
+    git clone https://github.com/nikbrunner/tmux-file-picker.git
+    cd tmux-file-picker
+    ```
+2.  Make it executable:
+    ```sh
+    chmod +x tmux-file-picker
+    ```
+3.  Create a symlink in your `PATH`:
+    ```sh
+    ln -s "$(pwd)/tmux-file-picker" ~/.local/bin/tmux-file-picker
     ```
 
 ## Dependencies

@@ -112,8 +112,12 @@ main() {
 
 	# --- Mode Detection ---
 	local at_prefix_mode=false
+	local backtick_mode=false
+
 	if pgrep -P "$pane_pid" -f ".*claude.*|node.*gemini|codex" >/dev/null; then
 		at_prefix_mode=true
+	elif pgrep -P "$pane_pid" -f ".*nvim.*|.*vim.*" >/dev/null; then
+		backtick_mode=true
 	fi
 
 	local git_root
@@ -128,9 +132,11 @@ main() {
 		# When using zoxide, output absolute path
 		local output_path="$search_dir"
 
-		# Format output for at_prefix_mode if needed
+		# Format output based on detected mode
 		if $at_prefix_mode; then
 			tmux send-keys -t "$pane_id" "@$output_path "
+		elif $backtick_mode; then
+			tmux send-keys -t "$pane_id" "\`$output_path\` "
 		else
 			printf -v escaped_path "%q" "$output_path"
 			tmux send-keys -t "$pane_id" "$escaped_path "
@@ -216,6 +222,13 @@ main() {
 	if $at_prefix_mode; then
 		# Prefix each file with '@' and join with spaces
 		printf -v files_oneline "@%s " "${relative_paths[@]}"
+	elif $backtick_mode; then
+		# Wrap each file in backticks and join with spaces
+		local backticked_paths=()
+		for path in "${relative_paths[@]}"; do
+			backticked_paths+=("\`$path\`")
+		done
+		files_oneline=$(printf "%s " "${backticked_paths[@]}")
 	else
 		# Shell-escape each file path and join with spaces
 		local escaped_paths=()
