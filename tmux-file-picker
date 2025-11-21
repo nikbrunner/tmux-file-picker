@@ -165,9 +165,21 @@ main() {
 
 	# Allow passing additional fd flags through environment variable
 	local fd_flags="${TMUX_FILE_PICKER_FD_FLAGS:--H --type f --exclude .git}"
+	local fd_flags_no_ignore="$fd_flags --no-ignore"
 
+	# Build fzf command with toggle binding for gitignore
+	# Uses transform action with FZF_PROMPT to track state
 	local selected_files_str
-	selected_files_str=$(cd "$search_dir" && $fd_cmd $fd_flags | fzf --multi --reverse --preview "$preview_cmd" || true)
+	selected_files_str=$(cd "$search_dir" && \
+		$fd_cmd $fd_flags | \
+		fzf --multi --reverse \
+		    --preview "$preview_cmd" \
+		    --prompt 'gitignore:ON> ' \
+		    --header 'ALT-I: toggle gitignore filter' \
+		    --bind "alt-i:transform:[[ ! \$FZF_PROMPT =~ ON ]] &&
+		        echo \"change-prompt(gitignore:ON> )+reload($fd_cmd $fd_flags)\" ||
+		        echo \"change-prompt(gitignore:OFF> )+reload($fd_cmd $fd_flags_no_ignore)\"" \
+		|| true)
 
 	if [[ -z "$selected_files_str" ]]; then
 		exit 0

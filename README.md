@@ -99,6 +99,14 @@ Reload your tmux configuration for the changes to take effect:
 4.  Press `Enter` to select one file, or `Tab` to select multiple files.
 5.  The selected file path(s) will be pasted directly at your cursor position.
 
+### Keybindings inside the picker
+
+While the fzf picker is open, you can use these keybindings:
+
+- `Alt-I`: Toggle gitignore filter (show all files / respect .gitignore)
+- `Tab`: Select multiple files
+- `Enter`: Confirm selection
+
 ### Searching a specific directory
 
 You can pass a path as an argument to search a specific directory instead of the
