@@ -169,16 +169,27 @@ main() {
 
 	# Build fzf command with toggle binding for gitignore
 	# Uses transform action with FZF_PROMPT to track state
+	# Add ctrl-e binding for nvim to edit file directly
+	local fzf_header='ALT-I: toggle gitignore filter'
+	local fzf_opts=(
+		--multi
+		--reverse
+		--preview "$preview_cmd"
+		--prompt 'gitignore:ON> '
+		--bind "alt-i:transform:[[ ! \$FZF_PROMPT =~ ON ]] &&
+		    echo \"change-prompt(gitignore:ON> )+reload($fd_cmd $fd_flags)\" ||
+		    echo \"change-prompt(gitignore:OFF> )+reload($fd_cmd $fd_flags_no_ignore)\""
+	)
+
+	if $backtick_mode; then
+		fzf_header='ALT-I: toggle gitignore | CTRL-E: edit in nvim'
+		fzf_opts+=(--bind "ctrl-e:execute-silent(tmux send-keys -t $pane_id Escape :e Space {} Enter)+abort")
+	fi
+
 	local selected_files_str
 	selected_files_str=$(cd "$search_dir" && \
 		$fd_cmd $fd_flags | \
-		fzf --multi --reverse \
-		    --preview "$preview_cmd" \
-		    --prompt 'gitignore:ON> ' \
-		    --header 'ALT-I: toggle gitignore filter' \
-		    --bind "alt-i:transform:[[ ! \$FZF_PROMPT =~ ON ]] &&
-		        echo \"change-prompt(gitignore:ON> )+reload($fd_cmd $fd_flags)\" ||
-		        echo \"change-prompt(gitignore:OFF> )+reload($fd_cmd $fd_flags_no_ignore)\"" \
+		fzf "${fzf_opts[@]}" --header "$fzf_header" \
 		|| true)
 
 	if [[ -z "$selected_files_str" ]]; then
