@@ -167,11 +167,23 @@ main() {
 	local fd_flags="${TMUX_FILE_PICKER_FD_FLAGS:--H --type f --exclude .git}"
 	local fd_flags_no_ignore="$fd_flags --no-ignore"
 
+	# Create temp file to track directory changes from Alt-Z
+	local dir_file
+	dir_file=$(mktemp)
+	echo "$search_dir" > "$dir_file"
+	trap "rm -f '$dir_file'" EXIT
+
+	# Build zoxide preview command
+	local zoxide_preview_cmd='ls -ap --color=always {}'
+	if command -v tree >/dev/null 2>&1; then
+		zoxide_preview_cmd='tree -C {} | head -n 30'
+	fi
+
 	# Build fzf command with toggle binding for gitignore
 	# Uses transform action with FZF_PROMPT to track state
-	# Add ctrl-e binding for nvim to edit file directly
+	# Alt-Z opens zoxide picker and reloads files from selected directory
 	local fzf_header="$search_dir
-ALT-I: toggle gitignore filter"
+ALT-I: toggle gitignore | ALT-Z: change directory"
 	local fzf_opts=(
 		--multi
 		--reverse
@@ -180,11 +192,13 @@ ALT-I: toggle gitignore filter"
 		--bind "alt-i:transform:[[ ! \$FZF_PROMPT =~ ON ]] &&
 		    echo \"change-prompt(gitignore:ON> )+reload($fd_cmd $fd_flags)\" ||
 		    echo \"change-prompt(gitignore:OFF> )+reload($fd_cmd $fd_flags_no_ignore)\""
+		--bind "alt-z:execute(zoxide query -l | fzf --reverse --preview '$zoxide_preview_cmd' > '$dir_file')+transform:[[ -s '$dir_file' ]] && echo \"reload(cd \\\"\$(cat '$dir_file')\\\" && $fd_cmd $fd_flags)+change-header(\$(cat '$dir_file')
+ALT-I: toggle gitignore | ALT-Z: change directory)\" || echo 'refresh-preview'"
 	)
 
 	if $backtick_mode; then
 		fzf_header="$search_dir
-ALT-I: toggle gitignore | CTRL-E: edit in nvim"
+ALT-I: toggle gitignore | ALT-Z: change directory | CTRL-E: edit in nvim"
 		fzf_opts+=(--bind "ctrl-e:execute-silent(tmux send-keys -t $pane_id Escape :e Space {} Enter)+abort")
 	fi
 
@@ -193,6 +207,15 @@ ALT-I: toggle gitignore | CTRL-E: edit in nvim"
 		$fd_cmd $fd_flags | \
 		fzf "${fzf_opts[@]}" --header "$fzf_header" \
 		|| true)
+
+	# Check if directory was changed via Alt-Z
+	local final_search_dir
+	final_search_dir=$(cat "$dir_file")
+	local dir_was_changed=false
+	if [[ "$final_search_dir" != "$search_dir" ]]; then
+		dir_was_changed=true
+		search_dir="$final_search_dir"
+	fi
 
 	if [[ -z "$selected_files_str" ]]; then
 		exit 0
@@ -209,8 +232,8 @@ ALT-I: toggle gitignore | CTRL-E: edit in nvim"
 	# --- Path Relativization ---
 	local relative_paths=()
 
-	# When using zoxide, return absolute paths
-	if $use_zoxide; then
+	# When using zoxide or directory was changed via Alt-Z, return absolute paths
+	if $use_zoxide || $dir_was_changed; then
 		# Prepend search directory to each filename to create full paths
 		relative_paths=("${selected_files[@]/#/$search_dir\/}")
 	else
