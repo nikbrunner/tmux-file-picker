@@ -167,11 +167,16 @@ main() {
 	local fd_flags="${TMUX_FILE_PICKER_FD_FLAGS:--H --type f --exclude .git}"
 	local fd_flags_no_ignore="$fd_flags --no-ignore"
 
-	# Create temp file to track directory changes from Alt-Z
+	# Create temp files to track state changes
 	local dir_file
 	dir_file=$(mktemp)
 	echo "$search_dir" > "$dir_file"
-	trap "rm -f '$dir_file'" EXIT
+
+	local dir_mode_file
+	dir_mode_file=$(mktemp)
+	echo "false" > "$dir_mode_file"
+
+	trap "rm -f '$dir_file' '$dir_mode_file'" EXIT
 
 	# Build zoxide preview command
 	local zoxide_preview_cmd='ls -ap --color=always {}'
@@ -182,8 +187,9 @@ main() {
 	# Build fzf command with toggle binding for gitignore
 	# Uses transform action with FZF_PROMPT to track state
 	# Alt-Z opens zoxide picker and reloads files from selected directory
+	# Alt-Enter outputs directory path instead of file path
 	local fzf_header="$search_dir
-ALT-I: toggle gitignore | ALT-Z: change directory"
+ALT-I: gitignore | ALT-Z: chdir | ALT-ENTER: dir path"
 	local fzf_opts=(
 		--multi
 		--reverse
@@ -193,12 +199,13 @@ ALT-I: toggle gitignore | ALT-Z: change directory"
 		    echo \"change-prompt(gitignore:ON> )+reload($fd_cmd $fd_flags)\" ||
 		    echo \"change-prompt(gitignore:OFF> )+reload($fd_cmd $fd_flags_no_ignore)\""
 		--bind "alt-z:execute(zoxide query -l | fzf --reverse --preview '$zoxide_preview_cmd' > '$dir_file')+transform:[[ -s '$dir_file' ]] && echo \"reload(cd \\\"\$(cat '$dir_file')\\\" && $fd_cmd $fd_flags)+change-header(\$(cat '$dir_file')
-ALT-I: toggle gitignore | ALT-Z: change directory)\" || echo 'refresh-preview'"
+ALT-I: gitignore | ALT-Z: chdir | ALT-ENTER: dir path)\" || echo 'refresh-preview'"
+		--bind "alt-enter:execute-silent(echo true > '$dir_mode_file')+accept"
 	)
 
 	if $backtick_mode; then
 		fzf_header="$search_dir
-ALT-I: toggle gitignore | ALT-Z: change directory | CTRL-E: edit in nvim"
+ALT-I: gitignore | ALT-Z: chdir | ALT-ENTER: dir | CTRL-E: nvim"
 		fzf_opts+=(--bind "ctrl-e:execute-silent(tmux send-keys -t $pane_id Escape :e Space {} Enter)+abort")
 	fi
 
@@ -215,6 +222,12 @@ ALT-I: toggle gitignore | ALT-Z: change directory | CTRL-E: edit in nvim"
 	if [[ "$final_search_dir" != "$search_dir" ]]; then
 		dir_was_changed=true
 		search_dir="$final_search_dir"
+	fi
+
+	# Check if directory mode was requested via Alt-Enter
+	local dir_mode=false
+	if [[ "$(cat "$dir_mode_file")" == "true" ]]; then
+		dir_mode=true
 	fi
 
 	if [[ -z "$selected_files_str" ]]; then
@@ -263,6 +276,25 @@ ALT-I: toggle gitignore | ALT-Z: change directory | CTRL-E: edit in nvim"
 			# Paths are already relative to the correct directory (the pane_dir)
 			relative_paths=("${selected_files[@]}")
 		fi
+	fi
+
+	# --- Directory Mode Processing ---
+	# If Alt-Enter was pressed, convert file paths to their directory paths
+	if $dir_mode; then
+		local dir_paths=()
+		for path in "${relative_paths[@]}"; do
+			dir_paths+=("$(dirname "$path")")
+		done
+		# Remove duplicates while preserving order
+		local unique_dirs=()
+		local -A seen=()
+		for dir in "${dir_paths[@]}"; do
+			if [[ -z "${seen[$dir]:-}" ]]; then
+				seen[$dir]=1
+				unique_dirs+=("$dir")
+			fi
+		done
+		relative_paths=("${unique_dirs[@]}")
 	fi
 
 	# --- Output Formatting ---
