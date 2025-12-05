@@ -167,6 +167,22 @@ main() {
 	local fd_flags="${TMUX_FILE_PICKER_FD_FLAGS:--H --type f --exclude .git}"
 	local fd_flags_no_ignore="$fd_flags --no-ignore"
 
+	# Helper to list files with git status prefix (dirty files first, deduped)
+	# Format: "XY<tab>filename" where XY is git status (or spaces for clean files)
+	# Uses marker line to separate git status from fd output for proper deduping
+	local list_files_awk='
+		/^---GIT_END---$/ { in_fd = 1; next }
+		!in_fd {
+			status = substr($0, 1, 2)
+			file = substr($0, 4)
+			print status "\t" file
+			seen[file] = 1
+		}
+		in_fd && !seen[$0] { print "  \t" $0 }
+	'
+	local list_files_cmd="{ git status --porcelain 2>/dev/null; echo '---GIT_END---'; $fd_cmd $fd_flags; } | awk '$list_files_awk'"
+	local list_files_cmd_no_ignore="{ git status --porcelain 2>/dev/null; echo '---GIT_END---'; $fd_cmd $fd_flags_no_ignore; } | awk '$list_files_awk'"
+
 	# Create temp files to track state changes
 	local dir_file
 	dir_file=$(mktemp)
@@ -193,12 +209,13 @@ ALT-I: gitignore | ALT-Z: chdir | ALT-ENTER: dir path"
 	local fzf_opts=(
 		--multi
 		--reverse
-		--preview "$preview_cmd"
+		--delimiter=$'\t'
+		--preview "${preview_cmd/\{\}/\{2\}}"
 		--prompt 'gitignore:ON> '
 		--bind "alt-i:transform:[[ ! \$FZF_PROMPT =~ ON ]] &&
-		    echo \"change-prompt(gitignore:ON> )+reload($fd_cmd $fd_flags)\" ||
-		    echo \"change-prompt(gitignore:OFF> )+reload($fd_cmd $fd_flags_no_ignore)\""
-		--bind "alt-z:execute(zoxide query -l | fzf --reverse --preview '$zoxide_preview_cmd' > '$dir_file')+transform:[[ -s '$dir_file' ]] && echo \"reload(cd \\\"\$(cat '$dir_file')\\\" && $fd_cmd $fd_flags)+change-header(\$(cat '$dir_file')
+		    echo \"change-prompt(gitignore:ON> )+reload($list_files_cmd)\" ||
+		    echo \"change-prompt(gitignore:OFF> )+reload($list_files_cmd_no_ignore)\""
+		--bind "alt-z:execute(zoxide query -l | fzf --reverse --preview '$zoxide_preview_cmd' > '$dir_file')+transform:[[ -s '$dir_file' ]] && echo \"reload(cd \\\"\$(cat '$dir_file')\\\" && $list_files_cmd)+change-header(\$(cat '$dir_file')
 ALT-I: gitignore | ALT-Z: chdir | ALT-ENTER: dir path)\" || echo 'refresh-preview'"
 		--bind "alt-enter:execute-silent(echo true > '$dir_mode_file')+accept"
 	)
@@ -206,12 +223,12 @@ ALT-I: gitignore | ALT-Z: chdir | ALT-ENTER: dir path)\" || echo 'refresh-previe
 	if $backtick_mode; then
 		fzf_header="$search_dir
 ALT-I: gitignore | ALT-Z: chdir | ALT-ENTER: dir | CTRL-E: nvim"
-		fzf_opts+=(--bind "ctrl-e:execute-silent(tmux send-keys -t $pane_id Escape :e Space {} Enter)+abort")
+		fzf_opts+=(--bind "ctrl-e:execute-silent(tmux send-keys -t $pane_id Escape :e Space {2} Enter)+abort")
 	fi
 
 	local selected_files_str
 	selected_files_str=$(cd "$search_dir" && \
-		$fd_cmd $fd_flags | \
+		eval "$list_files_cmd" | \
 		fzf "${fzf_opts[@]}" --header "$fzf_header" \
 		|| true)
 
@@ -235,10 +252,12 @@ ALT-I: gitignore | ALT-Z: chdir | ALT-ENTER: dir | CTRL-E: nvim"
 	fi
 
 	# --- Path Processing ---
+	# Strip the git status prefix (format: "XY<tab>filename" -> "filename")
 	selected_files=()
 	while IFS= read -r line; do
 		if [[ -n "$line" ]]; then
-			selected_files+=("$line")
+			# Remove everything up to and including the tab
+			selected_files+=("${line#*$'\t'}")
 		fi
 	done <<<"$selected_files_str"
 
