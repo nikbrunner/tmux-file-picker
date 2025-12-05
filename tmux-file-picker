@@ -170,12 +170,27 @@ main() {
 	# Helper to list files with git status prefix (dirty files first, deduped)
 	# Format: "XY<tab>filename" where XY is git status (or spaces for clean files)
 	# Uses marker line to separate git status from fd output for proper deduping
+	# Colors: blue=modified, green=added, red=deleted, cyan=untracked
 	local list_files_awk='
+		BEGIN {
+			reset = "\033[0m"
+			blue = "\033[38;2;96;165;250m"    # #60A5FA
+			green = "\033[38;2;74;222;128m"   # #4ADE80
+			red = "\033[38;2;248;113;113m"    # #F87171
+			cyan = "\033[38;2;34;211;238m"    # #22D3EE
+		}
 		/^---GIT_END---$/ { in_fd = 1; next }
 		!in_fd {
 			status = substr($0, 1, 2)
 			file = substr($0, 4)
-			print status "\t" file
+			# Color based on status
+			if (status ~ /\?/) color = cyan
+			else if (status ~ /A/) color = green
+			else if (status ~ /D/) color = red
+			else if (status ~ /[MRC]/) color = blue
+			else color = ""
+			if (color) print color status reset "\t" file
+			else print status "\t" file
 			seen[file] = 1
 		}
 		in_fd && !seen[$0] { print "  \t" $0 }
@@ -209,6 +224,7 @@ ALT-I: gitignore | ALT-Z: chdir | ALT-ENTER: dir path"
 	local fzf_opts=(
 		--multi
 		--reverse
+		--ansi
 		--delimiter=$'\t'
 		--preview "${preview_cmd/\{\}/\{2\}}"
 		--prompt 'gitignore:ON> '
