@@ -183,6 +183,8 @@ main() {
 		!in_fd {
 			status = substr($0, 1, 2)
 			file = substr($0, 4)
+			# Strip quotes from filenames (git quotes names with spaces)
+			gsub(/^"|"$/, "", file)
 			# Color based on status
 			if (status ~ /\?/) color = cyan
 			else if (status ~ /A/) color = green
