@@ -1,25 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-_select_zoxide_dir() {
-	if ! command -v zoxide >/dev/null 2>&1; then
-		echo "Error: Required command 'zoxide' not found. Please install it." >&2
-		exit 1
-	fi
-
-	local zoxide_preview_cmd='ls -ap --color=always {}'
-	if command -v tree >/dev/null 2>&1; then
-		# Use tree for a richer preview if available
-		zoxide_preview_cmd='tree -C {} | head -n 30'
-	fi
-
-	# Use fzf to select a directory from zoxide's list.
-	# The '|| true' prevents the script from exiting if the user cancels fzf.
-	local dir
-	dir=$(zoxide query -l | fzf --reverse --preview "$zoxide_preview_cmd" || true)
-	echo "$dir"
-}
-
 main() {
 	if [[ -z "${TMUX-}" ]]; then
 		echo "Error: This script must be run inside a tmux session." >&2
@@ -35,22 +16,12 @@ main() {
 
 	# --- Argument Parsing ---
 	local use_git_root=false
-	local use_zoxide=false
-	local dir_only=false
 	local path_arg=""
 
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
 			--git-root|-g)
 				use_git_root=true
-				shift
-				;;
-			--zoxide)
-				use_zoxide=true
-				shift
-				;;
-			--dir-only)
-				dir_only=true
 				shift
 				;;
 			-*)
@@ -68,43 +39,22 @@ main() {
 		esac
 	done
 
-	# Check for conflicting arguments
-	if $use_zoxide && [[ -n "$path_arg" ]]; then
-		echo "Error: The --zoxide flag cannot be used with a path argument." >&2
-		exit 1
+	local search_dir="${path_arg:-$pane_dir}"
+
+	# Convert to absolute path if relative
+	if [[ ! "$search_dir" = /* ]]; then
+		search_dir="$pane_dir/$search_dir"
 	fi
 
-	if $dir_only && ! $use_zoxide; then
-		echo "Error: The --dir-only flag can only be used with --zoxide." >&2
-		exit 1
+	# Use realpath to resolve ".." and "." components and get a canonical path
+	local realpath_cmd="realpath"
+	[[ "$OSTYPE" == "darwin"* ]] && realpath_cmd="grealpath"
+
+	if command -v "$realpath_cmd" >/dev/null 2>&1; then
+		search_dir=$("$realpath_cmd" -m "$search_dir")
 	fi
 
-	local search_dir
-
-	if $use_zoxide; then
-		search_dir=$(_select_zoxide_dir)
-		# Exit gracefully if no directory was selected from fzf
-		if [[ -z "$search_dir" ]]; then
-			exit 0
-		fi
-	else
-		search_dir="${path_arg:-$pane_dir}"
-
-		# Convert to absolute path if relative
-		if [[ ! "$search_dir" = /* ]]; then
-			search_dir="$pane_dir/$search_dir"
-		fi
-
-		# Use realpath to resolve ".." and "." components and get a canonical path
-		local realpath_cmd="realpath"
-		[[ "$OSTYPE" == "darwin"* ]] && realpath_cmd="grealpath"
-
-		if command -v "$realpath_cmd" >/dev/null 2>&1; then
-			search_dir=$("$realpath_cmd" -m "$search_dir")
-		fi
-	fi
-
-	# Verify the directory exists (this check is now common to both paths)
+	# Verify the directory exists
 	if [[ ! -d "$search_dir" ]]; then
 		echo "Error: Directory '$search_dir' does not exist." >&2
 		exit 1
@@ -125,23 +75,6 @@ main() {
 	if $use_git_root && [[ -z "$git_root" ]]; then
 		echo "Error: --git-root flag used, but not inside a git repository." >&2
 		exit 1
-	fi
-
-	# If --dir-only is set, just output the directory path and exit
-	if $dir_only; then
-		# When using zoxide, output absolute path
-		local output_path="$search_dir"
-
-		# Format output based on detected mode
-		if $at_prefix_mode; then
-			tmux send-keys -t "$pane_id" "@$output_path "
-		elif $backtick_mode; then
-			tmux send-keys -t "$pane_id" "\`$output_path\` "
-		else
-			printf -v escaped_path "%q" "$output_path"
-			tmux send-keys -t "$pane_id" "$escaped_path "
-		fi
-		exit 0
 	fi
 
 	# --- Command Detection ---
@@ -209,20 +142,33 @@ main() {
 	dir_mode_file=$(mktemp)
 	echo "false" > "$dir_mode_file"
 
-	trap "rm -f '$dir_file' '$dir_mode_file'" EXIT
-
-	# Build zoxide preview command
-	local zoxide_preview_cmd='ls -ap --color=always {}'
+	# Build directory preview command
+	local dir_preview_cmd='ls -ap --color=always {}'
 	if command -v tree >/dev/null 2>&1; then
-		zoxide_preview_cmd='tree -C {} | head -n 30'
+		dir_preview_cmd='tree -C {} | head -n 30'
 	fi
+
+	# Create a temp script for the directory picker (avoids fzf escaping issues)
+	local dir_picker_script
+	dir_picker_script=$(mktemp)
+	cat > "$dir_picker_script" << PICKER_EOF
+#!/usr/bin/env bash
+selected=\$($fd_cmd -H --type d --max-depth 10 --exclude .git . ~ | fzf --reverse --preview '$dir_preview_cmd')
+if [[ -n "\$selected" ]]; then
+    printf '%s' "\$selected"
+fi
+PICKER_EOF
+	chmod +x "$dir_picker_script"
+	trap "rm -f '$dir_file' '$dir_mode_file' '$dir_picker_script'" EXIT
+
+	local header_line="ALT-I: gitignore | CTRL-D: chdir | ALT-ENTER: dir path"
 
 	# Build fzf command with toggle binding for gitignore
 	# Uses transform action with FZF_PROMPT to track state
-	# Alt-Z opens zoxide picker and reloads files from selected directory
+	# Ctrl-D opens directory picker and reloads files from selected directory
 	# Alt-Enter outputs directory path instead of file path
 	local fzf_header="$search_dir
-ALT-I: gitignore | ALT-Z: chdir | ALT-ENTER: dir path"
+$header_line"
 	local fzf_opts=(
 		--multi
 		--reverse
@@ -233,14 +179,14 @@ ALT-I: gitignore | ALT-Z: chdir | ALT-ENTER: dir path"
 		--bind "alt-i:transform:[[ ! \$FZF_PROMPT =~ ON ]] &&
 		    echo \"change-prompt(gitignore:ON> )+reload($list_files_cmd)\" ||
 		    echo \"change-prompt(gitignore:OFF> )+reload($list_files_cmd_no_ignore)\""
-		--bind "alt-z:execute(zoxide query -l | fzf --reverse --preview '$zoxide_preview_cmd' > '$dir_file')+transform:[[ -s '$dir_file' ]] && echo \"reload(cd \\\"\$(cat '$dir_file')\\\" && $list_files_cmd)+change-header(\$(cat '$dir_file')
-ALT-I: gitignore | ALT-Z: chdir | ALT-ENTER: dir path)\" || echo 'refresh-preview'"
+		--bind "ctrl-d:execute($dir_picker_script > '$dir_file')+reload($fd_cmd $fd_flags --absolute-path . \"\$(cat '$dir_file')\" | sed 's/^/  \t/')+transform:[[ -s '$dir_file' ]] && echo \"change-header(\$(cat '$dir_file')
+$header_line)\""
 		--bind "alt-enter:execute-silent(echo true > '$dir_mode_file')+accept"
 	)
 
 	if $backtick_mode; then
 		fzf_header="$search_dir
-ALT-I: gitignore | ALT-Z: chdir | ALT-ENTER: dir | CTRL-E: nvim"
+ALT-I: gitignore | CTRL-D: chdir | ALT-ENTER: dir | CTRL-E: nvim"
 		fzf_opts+=(--bind "ctrl-e:execute-silent(tmux send-keys -t $pane_id Escape :e Space {2} Enter)+abort")
 	fi
 
@@ -250,7 +196,7 @@ ALT-I: gitignore | ALT-Z: chdir | ALT-ENTER: dir | CTRL-E: nvim"
 		fzf "${fzf_opts[@]}" --header "$fzf_header" \
 		|| true)
 
-	# Check if directory was changed via Alt-Z
+	# Check if directory was changed via Ctrl-D
 	local final_search_dir
 	final_search_dir=$(cat "$dir_file")
 	local dir_was_changed=false
@@ -282,10 +228,9 @@ ALT-I: gitignore | ALT-Z: chdir | ALT-ENTER: dir | CTRL-E: nvim"
 	# --- Path Relativization ---
 	local relative_paths=()
 
-	# When using zoxide or directory was changed via Alt-Z, return absolute paths
-	if $use_zoxide || $dir_was_changed; then
-		# Prepend search directory to each filename to create full paths
-		relative_paths=("${selected_files[@]/#/$search_dir\/}")
+	# When directory was changed via Ctrl-D, files are already absolute paths
+	if $dir_was_changed; then
+		relative_paths=("${selected_files[@]}")
 	else
 		# Standard path relativization logic
 		local base_dir_for_relativization=""
