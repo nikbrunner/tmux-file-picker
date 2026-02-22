@@ -6,9 +6,8 @@ INSTALL_DIR := $(HOME)/.local/bin
 install:
 	mkdir -p $(INSTALL_DIR)
 	rm -f $(INSTALL_DIR)/$(BINARY)
-	cp $(BINARY) $(INSTALL_DIR)/$(BINARY)
-	chmod +x $(INSTALL_DIR)/$(BINARY)
-	@echo "Installed $(BINARY) to $(INSTALL_DIR)"
+	ln -s $(CURDIR)/$(BINARY) $(INSTALL_DIR)/$(BINARY)
+	@echo "Linked $(INSTALL_DIR)/$(BINARY) -> $(CURDIR)/$(BINARY)"
 
 uninstall:
 	rm -f $(INSTALL_DIR)/$(BINARY)
