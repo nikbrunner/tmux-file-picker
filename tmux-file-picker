@@ -142,6 +142,9 @@ main() {
 	dir_mode_file=$(mktemp)
 	echo "false" > "$dir_mode_file"
 
+	local readme_file
+	readme_file=$(mktemp)
+
 	# Build directory preview command
 	local dir_preview_cmd='ls -ap --color=always {}'
 	if command -v tree >/dev/null 2>&1; then
@@ -159,9 +162,28 @@ if [[ -n "\$selected" ]]; then
 fi
 PICKER_EOF
 	chmod +x "$dir_picker_script"
-	trap "rm -f '$dir_file' '$dir_mode_file' '$dir_picker_script'" EXIT
 
-	local header_line="ALT-I: gitignore | ALT-D: chdir | ALT-ENTER: dir path"
+	# Create a temp script for the README reference picker
+	local readme_picker_script
+	readme_picker_script=$(mktemp)
+	local refs_dir="${TMUX_FILE_PICKER_REFS_DIR:-$HOME/repos}"
+	local readme_preview_cmd="cat {}"
+	if command -v bat >/dev/null 2>&1; then
+		readme_preview_cmd="bat --style=numbers --color=always {}"
+	elif command -v batcat >/dev/null 2>&1; then
+		readme_preview_cmd="batcat --style=numbers --color=always {}"
+	fi
+	cat > "$readme_picker_script" << PICKER_EOF
+#!/usr/bin/env bash
+selected=\$($fd_cmd -d 3 --type f 'README' '$refs_dir' | fzf --reverse --preview '$readme_preview_cmd')
+if [[ -n "\$selected" ]]; then
+    printf '%s' "\$selected"
+fi
+PICKER_EOF
+	chmod +x "$readme_picker_script"
+	trap "rm -f '$dir_file' '$dir_mode_file' '$dir_picker_script' '$readme_file' '$readme_picker_script'" EXIT
+
+	local header_line="ALT-I: gitignore | ALT-D: chdir | ALT-R: refs | ALT-ENTER: dir path"
 
 	# Build fzf command with toggle binding for gitignore
 	# Uses transform action with FZF_PROMPT to track state
@@ -184,11 +206,12 @@ $header_line)\""
 		--bind "ctrl-d:preview-half-page-down"
 		--bind "ctrl-u:preview-half-page-up"
 		--bind "alt-enter:execute-silent(echo true > '$dir_mode_file')+accept"
+		--bind "alt-r:execute($readme_picker_script > '$readme_file')+abort"
 	)
 
 	if $backtick_mode; then
 		fzf_header="$search_dir
-ALT-I: gitignore | ALT-D: chdir | ALT-ENTER: dir | CTRL-E: nvim"
+ALT-I: gitignore | ALT-D: chdir | ALT-R: refs | ALT-ENTER: dir | CTRL-E: nvim"
 		fzf_opts+=(--bind "ctrl-e:execute-silent(tmux send-keys -t $pane_id Escape :e Space {2} Enter)+abort")
 	fi
 
@@ -213,11 +236,22 @@ ALT-I: gitignore | ALT-D: chdir | ALT-ENTER: dir | CTRL-E: nvim"
 		dir_mode=true
 	fi
 
-	if [[ -z "$selected_files_str" ]]; then
+	# Check if README reference mode was triggered (Alt-r)
+	local readme_abs_path
+	readme_abs_path=$(cat "$readme_file")
+
+	if [[ -z "$selected_files_str" && -z "$readme_abs_path" ]]; then
 		exit 0
 	fi
 
 	# --- Path Processing ---
+	local relative_paths=()
+
+	if [[ -n "$readme_abs_path" ]]; then
+		# README reference mode: output absolute path directly
+		relative_paths=("$readme_abs_path")
+	else
+
 	# Strip the git status prefix (format: "XY<tab>filename" -> "filename")
 	selected_files=()
 	while IFS= read -r line; do
@@ -228,7 +262,6 @@ ALT-I: gitignore | ALT-D: chdir | ALT-ENTER: dir | CTRL-E: nvim"
 	done <<<"$selected_files_str"
 
 	# --- Path Relativization ---
-	local relative_paths=()
 
 	# When directory was changed via Ctrl-D, files are already absolute paths
 	if $dir_was_changed; then
@@ -261,6 +294,8 @@ ALT-I: gitignore | ALT-D: chdir | ALT-ENTER: dir | CTRL-E: nvim"
 			relative_paths=("${selected_files[@]}")
 		fi
 	fi
+
+	fi # end readme_abs_path else branch
 
 	# --- Directory Mode Processing ---
 	# If Alt-Enter was pressed, convert file paths to their directory paths
