@@ -243,6 +243,7 @@ $header_line"
 		--ansi
 		--delimiter=$'\t'
 		--preview "${preview_cmd/\{\}/\{2\}}"
+		--preview-window 'right,50%,border-left,<100(down,50%,border-top)'
 		--prompt 'gitignore:ON> '
 		--bind "alt-i:transform:[[ ! \$FZF_PROMPT =~ ON ]] &&
 		    echo \"change-prompt(gitignore:ON> )+reload($list_files_cmd)\" ||
