@@ -8,9 +8,16 @@ This is a bash script that provides a tmux popup interface for quickly selecting
 
 ## Core Architecture
 
+### Configuration
+- Config file: `~/.config/tmux-file-picker/config` (sourceable bash)
+- Example: `config.example` in repo root
+- `_load_config()` (tmux-file-picker:4-18) loads defaults then sources config
+- Settings: `dir_roots`, `use_zoxide`, `dir_excludes`, `dir_max_depth`, `fd_flags`, `refs_dir`
+- Install config via `make install-config`
+
 ### Main Entry Point
-- `main()` function (tmux-file-picker:23) orchestrates the entire flow
-- Script must run inside a tmux session (validates at tmux-file-picker:24)
+- `main()` function (tmux-file-picker:20) orchestrates the entire flow
+- Script must run inside a tmux session (validates at tmux-file-picker:21)
 
 ### Execution Flow
 1. **Argument Parsing** (tmux-file-picker:36-79): Processes flags and path arguments
@@ -22,14 +29,15 @@ This is a bash script that provides a tmux popup interface for quickly selecting
 
 ### Key Features
 
-**Zoxide Integration** (`_select_zoxide_dir()` at tmux-file-picker:4-21)
-- Optional two-step workflow: directory selection then file selection
-- Returns absolute paths when using `--zoxide`
-- Supports `--dir-only` to skip file selection step
+**Directory Picker (Alt-D)**
+- Searches within configured `dir_roots` (defaults to `~` if unset)
+- Optionally merges zoxide frecent directories when `use_zoxide=true`
+- Excludes noise directories via `dir_excludes` config
+- Deduplicates results when zoxide and fd overlap
 
 **Smart Path Handling**
 - Relative paths: Default when searching from current directory
-- Absolute paths: Used with `--zoxide` flag
+- Absolute paths: Used when directory is changed via Alt-D
 - Git-relative paths: With `--git-root` flag, paths are relative to git repository root
 
 **At-Prefix Mode Detection** (tmux-file-picker:114-117)
@@ -54,15 +62,12 @@ This is a bash script that provides a tmux popup interface for quickly selecting
 
 ### Flags
 - `--git-root` / `-g`: Show paths relative to git repository root
-- `--zoxide`: Select directory from zoxide frecent list first
-- `--dir-only`: With `--zoxide`, insert directory path only (skip file selection)
 
 ### Arguments
 - Optional path argument: Search in specific directory instead of current pane directory
-- Conflicting combinations will error (e.g., `--zoxide` with path argument)
 
 ### Environment Variables
-- `TMUX_FILE_PICKER_FD_FLAGS`: Customize fd behavior (default: `-H --type f --exclude .git`)
+- `XDG_CONFIG_HOME`: Overrides config file location (default: `~/.config`)
 
 ## Development Notes
 

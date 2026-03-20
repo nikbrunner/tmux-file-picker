@@ -1,11 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+_load_config() {
+	# Defaults
+	dir_roots=()
+	use_zoxide=false
+	dir_excludes=(node_modules .cache .npm .pnpm __pycache__ .venv Library Caches .Trash)
+	dir_max_depth=8
+	fd_flags="-H --type f --exclude .git"
+	refs_dir="$HOME/repos"
+
+	local config_file="${XDG_CONFIG_HOME:-$HOME/.config}/tmux-file-picker/config"
+	if [[ -f "$config_file" ]]; then
+		# shellcheck source=/dev/null
+		source "$config_file"
+	fi
+}
+
 main() {
 	if [[ -z "${TMUX-}" ]]; then
 		echo "Error: This script must be run inside a tmux session." >&2
 		exit 1
 	fi
+
+	_load_config
 
 	local pane_id
 	local pane_dir
@@ -96,8 +114,7 @@ main() {
 		preview_cmd="batcat --style=numbers --color=always {}"
 	fi
 
-	# Allow passing additional fd flags through environment variable
-	local fd_flags="${TMUX_FILE_PICKER_FD_FLAGS:--H --type f --exclude .git}"
+	# fd_flags comes from config (_load_config)
 	local fd_flags_no_ignore="$fd_flags --no-ignore"
 
 	# Helper to list files with git status prefix (dirty files first, deduped)
@@ -151,12 +168,40 @@ main() {
 		dir_preview_cmd='tree -C {} | head -n 30'
 	fi
 
+	# Build fd exclude args from config
+	local fd_exclude_args=""
+	for pattern in "${dir_excludes[@]}"; do
+		fd_exclude_args+=" --exclude $pattern"
+	done
+
+	# Build fd search roots for directory picker
+	local fd_search_roots=""
+	if [[ ${#dir_roots[@]} -gt 0 ]]; then
+		for root in "${dir_roots[@]}"; do
+			# Expand ~ in case config uses it
+			local expanded_root="${root/#\~/$HOME}"
+			if [[ -d "$expanded_root" ]]; then
+				fd_search_roots+=" '$expanded_root'"
+			fi
+		done
+	fi
+	# Fall back to home if no roots configured or none exist
+	if [[ -z "$fd_search_roots" ]]; then
+		fd_search_roots="'$HOME'"
+	fi
+
+	# Build zoxide merge command
+	local zoxide_cmd=""
+	if $use_zoxide && command -v zoxide >/dev/null 2>&1; then
+		zoxide_cmd="zoxide query -l 2>/dev/null;"
+	fi
+
 	# Create a temp script for the directory picker (avoids fzf escaping issues)
 	local dir_picker_script
 	dir_picker_script=$(mktemp)
 	cat > "$dir_picker_script" << PICKER_EOF
 #!/usr/bin/env bash
-selected=\$($fd_cmd -H --type d --max-depth 10 --exclude .git . ~ | fzf --reverse --preview '$dir_preview_cmd')
+selected=\$({ ${zoxide_cmd} $fd_cmd -H --type d --max-depth $dir_max_depth --exclude .git $fd_exclude_args . $fd_search_roots; } | awk '!seen[\$0]++' | fzf --reverse --preview '$dir_preview_cmd')
 if [[ -n "\$selected" ]]; then
     printf '%s' "\$selected"
 fi
@@ -166,7 +211,8 @@ PICKER_EOF
 	# Create a temp script for the README reference picker
 	local readme_picker_script
 	readme_picker_script=$(mktemp)
-	local refs_dir="${TMUX_FILE_PICKER_REFS_DIR:-$HOME/repos}"
+	# Expand ~ in refs_dir from config
+	refs_dir="${refs_dir/#\~/$HOME}"
 	local readme_preview_cmd="cat {}"
 	if command -v bat >/dev/null 2>&1; then
 		readme_preview_cmd="bat --style=numbers --color=always {}"

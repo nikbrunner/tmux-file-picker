@@ -1,0 +1,40 @@
+# tmux-file-picker configuration
+# Copy to ~/.config/tmux-file-picker/config
+
+# --- Directory Picker (Alt-D) ---
+
+# Root directories to search for subdirectories
+# If empty or unset, falls back to ~ (home directory)
+dir_roots=(
+    ~/repos
+)
+
+# Merge zoxide frecent directories into Alt-D results
+# Requires zoxide to be installed
+use_zoxide=true
+
+# Patterns to exclude from directory search
+dir_excludes=(
+    node_modules
+    .cache
+    .npm
+    .pnpm
+    __pycache__
+    .venv
+    Library
+    Caches
+    .Trash
+)
+
+# Maximum depth for directory search
+dir_max_depth=8
+
+# --- File Search ---
+
+# fd flags for file discovery
+fd_flags="-H --type f --exclude .git"
+
+# --- README References (Alt-R) ---
+
+# Where to search for README files
+refs_dir=~/repos
