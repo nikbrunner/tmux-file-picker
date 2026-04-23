@@ -5,7 +5,10 @@
       "Bash(bash:*)",
       "Bash(tmux:*)",
       "Bash(echo:*)",
-      "Bash(/opt/homebrew/bin/bash:*)"
+      "Bash(/opt/homebrew/bin/bash:*)",
+      "Bash(shellcheck *)",
+      "Bash(brew list *)",
+      "Bash(brew info *)"
     ]
   },
   "hooks": {}
