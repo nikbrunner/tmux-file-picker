@@ -64,13 +64,20 @@ main() {
 		search_dir="$pane_dir/$search_dir"
 	fi
 
-	# Use realpath to resolve ".." and "." components and get a canonical path
+	# Use realpath to resolve ".." and "." components and get a canonical path.
+	# Required for --git-root and Alt-D relativization; always required on macOS (grealpath from coreutils).
 	local realpath_cmd="realpath"
 	[[ "$OSTYPE" == "darwin"* ]] && realpath_cmd="grealpath"
 
-	if command -v "$realpath_cmd" >/dev/null 2>&1; then
-		search_dir=$("$realpath_cmd" -m "$search_dir")
+	if ! command -v "$realpath_cmd" >/dev/null 2>&1; then
+		echo "Error: Required command '$realpath_cmd' not found." >&2
+		if [[ "$OSTYPE" == "darwin"* ]]; then
+			echo "Install via: brew install coreutils" >&2
+		fi
+		exit 1
 	fi
+
+	search_dir=$("$realpath_cmd" -m "$search_dir")
 
 	# Verify the directory exists
 	if [[ ! -d "$search_dir" ]]; then
@@ -324,10 +331,6 @@ ALT-I: gitignore | ALT-D: chdir | ALT-R: refs | ALT-ENTER: dir | CTRL-E: nvim"
 		fi
 
 		if [[ -n "$base_dir_for_relativization" ]]; then
-			# We need to calculate relative paths against a specific base directory
-			local realpath_cmd="realpath"
-			[[ "$OSTYPE" == "darwin"* ]] && realpath_cmd="grealpath"
-
 			# Prepend search directory to each filename to create full paths
 			local full_paths=("${selected_files[@]/#/$search_dir\/}")
 
